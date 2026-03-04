@@ -1,0 +1,38 @@
+[package]
+name = "reqly"
+version = "0.1.0"
+edition = "2024"
+description = "A terminal-based HTTP API client (Postman for the terminal)"
+authors = ["Ajay"]
+
+[[bin]]
+name = "reqly"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "gzip", "deflate"] }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive", "color"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Serialization / JSON
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Terminal color output (CLI mode)
+colored = "2"
+
+# Time measurement
+tokio-util = "0.7"
