@@ -1,3 +1,3 @@
 pub mod parser;
 
-pub use parser::{Cli, ParsedRequest};
+pub use parser::{Cli, Commands, ParsedRequest};

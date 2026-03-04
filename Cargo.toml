@@ -1,9 +1,9 @@
 [package]
 name = "reqly"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "A terminal-based HTTP API client (Postman for the terminal)"
-authors = ["Ajay"]
+description = "A terminal-based HTTP/GraphQL/WebSocket API client (Postman for the terminal)"
+authors = ["Ajay Kumar"]
 
 [[bin]]
 name = "reqly"
@@ -34,5 +34,11 @@ thiserror = "2"
 # Terminal color output (CLI mode)
 colored = "2"
 
-# Time measurement
-tokio-util = "0.7"
+# WebSocket support
+tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+futures-util = "0.3"
+
+[dev-dependencies]
+# HTTP mocking for tests
+wiremock = "0.6"
+

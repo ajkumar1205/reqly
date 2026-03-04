@@ -19,7 +19,7 @@ impl HttpClient {
     /// Create a new `HttpClient`.
     pub fn new() -> Result<Self> {
         let client = Client::builder()
-            .user_agent("reqly/0.1.0")
+            .user_agent("reqly/0.2.0")
             .build()
             .context("Failed to build HTTP client")?;
         Ok(Self { inner: client })
@@ -75,5 +75,61 @@ impl HttpClient {
             body,
             duration_ms,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn test_http_client_get() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/api/test"))
+            .and(header("Accept", "application/json"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"status": "ok"})))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let mut req = HttpRequest::new("GET", format!("{}/api/test", mock_server.uri()));
+        req.headers
+            .insert("Accept".into(), "application/json".into());
+
+        let res = client.send(req).await.unwrap();
+
+        assert_eq!(res.status, 200);
+        assert!(res.is_json());
+        assert_eq!(res.body, r#"{"status":"ok"}"#);
+    }
+
+    #[tokio::test]
+    async fn test_http_client_post_body() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/api/submit"))
+            .and(header("Content-Type", "application/json"))
+            .and(body_json(json!({"name": "reqly"})))
+            .respond_with(ResponseTemplate::new(201).set_body_json(json!({"success": true})))
+            .expect(1)
+            .mount(&mock_server)
+            .await;
+
+        let client = HttpClient::new().unwrap();
+        let mut req = HttpRequest::new("POST", format!("{}/api/submit", mock_server.uri()));
+        req.headers
+            .insert("Content-Type".into(), "application/json".into());
+        req.body = Some(r#"{"name":"reqly"}"#.to_string());
+
+        let res = client.send(req).await.unwrap();
+
+        assert_eq!(res.status, 201);
     }
 }

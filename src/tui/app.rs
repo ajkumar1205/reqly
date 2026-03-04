@@ -1,38 +1,111 @@
-use crate::http::HttpResponse;
+use crate::protocols::graphql::GraphqlResponse;
+use crate::protocols::http::HttpResponse;
+use crate::protocols::websocket::ConnectionStatus;
 
-/// Which pane of the TUI is focused.
+// ─── Protocol Mode ────────────────────────────────────────────────────────────
+
+/// Which protocol the TUI is currently operating in.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ProtocolMode {
+    Http,
+    GraphQL,
+    WebSocket,
+}
+
+impl ProtocolMode {
+    #[allow(dead_code)]
+    pub fn label(&self) -> &str {
+        match self {
+            ProtocolMode::Http => "HTTP",
+            ProtocolMode::GraphQL => "GraphQL",
+            ProtocolMode::WebSocket => "WebSocket",
+        }
+    }
+
+    pub fn next(&self) -> ProtocolMode {
+        match self {
+            ProtocolMode::Http => ProtocolMode::GraphQL,
+            ProtocolMode::GraphQL => ProtocolMode::WebSocket,
+            ProtocolMode::WebSocket => ProtocolMode::Http,
+        }
+    }
+}
+
+// ─── Focused Panel ────────────────────────────────────────────────────────────
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum FocusedPanel {
+    // HTTP panels
     Method,
     Url,
     Headers,
     Body,
     Response,
+    // GraphQL panels
+    GqlEndpoint,
+    GqlQuery,
+    GqlVariables,
+    GqlResponse,
+    // WebSocket panels
+    WsUrl,
+    WsInput,
+    WsMessages,
 }
 
-/// Overall state of the TUI application.
+// ─── App State ────────────────────────────────────────────────────────────────
+
 pub struct App {
+    // ── Protocol selector
+    pub protocol: ProtocolMode,
+
+    // ── HTTP state (same as before)
     pub method: String,
     pub url: String,
     pub headers_raw: String,
     pub body_raw: String,
     pub response: Option<Result<HttpResponse, String>>,
+
+    // ── GraphQL state
+    pub gql_endpoint: String,
+    pub gql_query: String,
+    pub gql_variables: String,
+    pub gql_response: Option<Result<GraphqlResponse, String>>,
+
+    // ── WebSocket state
+    pub ws_url: String,
+    pub ws_status: ConnectionStatus,
+    pub ws_messages: Vec<String>,
+    pub ws_input: String,
+
+    // ── Shared
     pub focused: FocusedPanel,
     pub is_loading: bool,
     #[allow(dead_code)]
     pub should_quit: bool,
-    /// cursor offset within the currently focused text field
     pub cursor_pos: usize,
 }
 
 impl App {
     pub fn new() -> Self {
         Self {
+            protocol: ProtocolMode::Http,
+            // HTTP
             method: "GET".to_string(),
             url: String::new(),
             headers_raw: String::new(),
             body_raw: String::new(),
             response: None,
+            // GraphQL
+            gql_endpoint: String::new(),
+            gql_query: String::new(),
+            gql_variables: String::new(),
+            gql_response: None,
+            // WebSocket
+            ws_url: String::new(),
+            ws_status: ConnectionStatus::Disconnected,
+            ws_messages: Vec::new(),
+            ws_input: String::new(),
+            // Shared
             focused: FocusedPanel::Url,
             is_loading: false,
             should_quit: false,
@@ -40,7 +113,20 @@ impl App {
         }
     }
 
-    /// Cycle through the supported HTTP methods.
+    // ── Protocol cycling ──────────────────────────────────────────────────────
+
+    pub fn cycle_protocol(&mut self) {
+        self.protocol = self.protocol.next();
+        self.focused = match self.protocol {
+            ProtocolMode::Http => FocusedPanel::Url,
+            ProtocolMode::GraphQL => FocusedPanel::GqlEndpoint,
+            ProtocolMode::WebSocket => FocusedPanel::WsUrl,
+        };
+        self.cursor_pos = 0;
+    }
+
+    // ── HTTP helpers ──────────────────────────────────────────────────────────
+
     pub fn cycle_method(&mut self) {
         self.method = match self.method.as_str() {
             "GET" => "POST",
@@ -54,50 +140,76 @@ impl App {
         .to_string();
     }
 
-    /// Move focus to the next panel in order.
+    // ── Focus navigation ──────────────────────────────────────────────────────
+
     pub fn focus_next(&mut self) {
-        self.focused = match self.focused {
-            FocusedPanel::Method => FocusedPanel::Url,
-            FocusedPanel::Url => FocusedPanel::Headers,
-            FocusedPanel::Headers => FocusedPanel::Body,
-            FocusedPanel::Body => FocusedPanel::Response,
-            FocusedPanel::Response => FocusedPanel::Method,
+        self.focused = match (&self.protocol, &self.focused) {
+            (ProtocolMode::Http, FocusedPanel::Method) => FocusedPanel::Url,
+            (ProtocolMode::Http, FocusedPanel::Url) => FocusedPanel::Headers,
+            (ProtocolMode::Http, FocusedPanel::Headers) => FocusedPanel::Body,
+            (ProtocolMode::Http, FocusedPanel::Body) => FocusedPanel::Response,
+            (ProtocolMode::Http, FocusedPanel::Response) => FocusedPanel::Method,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlEndpoint) => FocusedPanel::GqlQuery,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlQuery) => FocusedPanel::GqlVariables,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlVariables) => FocusedPanel::GqlResponse,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlResponse) => FocusedPanel::GqlEndpoint,
+            (ProtocolMode::WebSocket, FocusedPanel::WsUrl) => FocusedPanel::WsInput,
+            (ProtocolMode::WebSocket, FocusedPanel::WsInput) => FocusedPanel::WsMessages,
+            (ProtocolMode::WebSocket, FocusedPanel::WsMessages) => FocusedPanel::WsUrl,
+            _ => self.focused.clone(),
         };
         self.cursor_pos = self.active_text().len();
     }
 
-    /// Move focus to the previous panel.
     pub fn focus_prev(&mut self) {
-        self.focused = match self.focused {
-            FocusedPanel::Method => FocusedPanel::Response,
-            FocusedPanel::Url => FocusedPanel::Method,
-            FocusedPanel::Headers => FocusedPanel::Url,
-            FocusedPanel::Body => FocusedPanel::Headers,
-            FocusedPanel::Response => FocusedPanel::Body,
+        self.focused = match (&self.protocol, &self.focused) {
+            (ProtocolMode::Http, FocusedPanel::Method) => FocusedPanel::Response,
+            (ProtocolMode::Http, FocusedPanel::Url) => FocusedPanel::Method,
+            (ProtocolMode::Http, FocusedPanel::Headers) => FocusedPanel::Url,
+            (ProtocolMode::Http, FocusedPanel::Body) => FocusedPanel::Headers,
+            (ProtocolMode::Http, FocusedPanel::Response) => FocusedPanel::Body,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlEndpoint) => FocusedPanel::GqlResponse,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlQuery) => FocusedPanel::GqlEndpoint,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlVariables) => FocusedPanel::GqlQuery,
+            (ProtocolMode::GraphQL, FocusedPanel::GqlResponse) => FocusedPanel::GqlVariables,
+            (ProtocolMode::WebSocket, FocusedPanel::WsUrl) => FocusedPanel::WsMessages,
+            (ProtocolMode::WebSocket, FocusedPanel::WsInput) => FocusedPanel::WsUrl,
+            (ProtocolMode::WebSocket, FocusedPanel::WsMessages) => FocusedPanel::WsInput,
+            _ => self.focused.clone(),
         };
         self.cursor_pos = self.active_text().len();
     }
 
-    /// Return a mutable reference to the text buffer for the focused panel.
-    pub fn active_text_mut(&mut self) -> Option<&mut String> {
-        match self.focused {
-            FocusedPanel::Url => Some(&mut self.url),
-            FocusedPanel::Headers => Some(&mut self.headers_raw),
-            FocusedPanel::Body => Some(&mut self.body_raw),
-            _ => None,
-        }
-    }
+    // ── Text editing ──────────────────────────────────────────────────────────
 
     pub fn active_text(&self) -> &str {
-        match self.focused {
+        match &self.focused {
             FocusedPanel::Url => &self.url,
             FocusedPanel::Headers => &self.headers_raw,
             FocusedPanel::Body => &self.body_raw,
+            FocusedPanel::GqlEndpoint => &self.gql_endpoint,
+            FocusedPanel::GqlQuery => &self.gql_query,
+            FocusedPanel::GqlVariables => &self.gql_variables,
+            FocusedPanel::WsUrl => &self.ws_url,
+            FocusedPanel::WsInput => &self.ws_input,
             _ => "",
         }
     }
 
-    /// Push a char at the current cursor position.
+    pub fn active_text_mut(&mut self) -> Option<&mut String> {
+        match &self.focused {
+            FocusedPanel::Url => Some(&mut self.url),
+            FocusedPanel::Headers => Some(&mut self.headers_raw),
+            FocusedPanel::Body => Some(&mut self.body_raw),
+            FocusedPanel::GqlEndpoint => Some(&mut self.gql_endpoint),
+            FocusedPanel::GqlQuery => Some(&mut self.gql_query),
+            FocusedPanel::GqlVariables => Some(&mut self.gql_variables),
+            FocusedPanel::WsUrl => Some(&mut self.ws_url),
+            FocusedPanel::WsInput => Some(&mut self.ws_input),
+            _ => None,
+        }
+    }
+
     pub fn insert_char(&mut self, c: char) {
         let pos = self.cursor_pos;
         if let Some(buf) = self.active_text_mut() {
@@ -108,7 +220,6 @@ impl App {
         self.cursor_pos += 1;
     }
 
-    /// Delete char before cursor (backspace).
     pub fn delete_char(&mut self) {
         if self.cursor_pos == 0 {
             return;
@@ -131,5 +242,10 @@ impl App {
         if self.cursor_pos < max {
             self.cursor_pos += 1;
         }
+    }
+
+    /// Add a message to the WebSocket log.
+    pub fn push_ws_message(&mut self, msg: String) {
+        self.ws_messages.push(msg);
     }
 }
