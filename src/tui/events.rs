@@ -73,21 +73,82 @@ fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
             return EventOutcome::Continue;
         }
 
-        // ENTER — send / connect
+        // Ctrl+S — global force send request
+        (KeyModifiers::CONTROL, KeyCode::Char('s')) => {
+            return EventOutcome::SendRequest;
+        }
+
+        // ENTER — behavior based on focused panel
         (KeyModifiers::NONE, KeyCode::Enter) => {
-            let is_response_panel = matches!(
+            let triggers_send = matches!(
                 app.focused,
-                FocusedPanel::Response | FocusedPanel::GqlResponse | FocusedPanel::WsMessages
+                // Single-line inputs trigger send
+                FocusedPanel::Method
+                | FocusedPanel::Url
+                | FocusedPanel::GqlEndpoint
+                | FocusedPanel::WsUrl
+                | FocusedPanel::WsInput
+                // Response panels resend
+                | FocusedPanel::Response
+                | FocusedPanel::GqlResponse
             );
-            if !is_response_panel {
+
+            if triggers_send {
                 return EventOutcome::SendRequest;
             }
+
+            // If it's a multiline editable panel (Headers, Body, GqlQuery, GqlVariables),
+            // we do NOT return here — it falls through to the editable panel section
+            // below to properly insert a '\n' character!
         }
 
         // SPACE on Method panel — cycle HTTP method
         (KeyModifiers::NONE, KeyCode::Char(' ')) if app.focused == FocusedPanel::Method => {
             app.cycle_method();
             return EventOutcome::Continue;
+        }
+
+        // 'y' or 'c' on Response panel to yank body
+        (KeyModifiers::NONE, KeyCode::Char('y')) | (KeyModifiers::NONE, KeyCode::Char('c')) => {
+            if app.focused == FocusedPanel::Response {
+                if let Some(Ok(resp)) = &app.response {
+                    let mut clipboard = arboard::Clipboard::new().unwrap();
+                    let _ = clipboard.set_text(resp.body.clone());
+                }
+                return EventOutcome::Continue;
+            } else if app.focused == FocusedPanel::GqlResponse {
+                if let Some(Ok(resp)) = &app.gql_response {
+                    let mut clipboard = arboard::Clipboard::new().unwrap();
+                    let _ = clipboard.set_text(resp.pretty_body());
+                }
+                return EventOutcome::Continue;
+            }
+        }
+
+        // Up/Down scrolling for Response panes OR navigation for editable panes
+        (KeyModifiers::NONE, KeyCode::Up) => {
+            if app.focused == FocusedPanel::Response {
+                app.response_scroll = app.response_scroll.saturating_sub(1);
+                return EventOutcome::Continue;
+            } else if app.focused == FocusedPanel::GqlResponse {
+                app.gql_response_scroll = app.gql_response_scroll.saturating_sub(1);
+                return EventOutcome::Continue;
+            } else if app.focused == FocusedPanel::WsMessages {
+                // ws scrolling not implemented yet, just return
+                return EventOutcome::Continue;
+            }
+        }
+        (KeyModifiers::NONE, KeyCode::Down) => {
+            if app.focused == FocusedPanel::Response {
+                app.response_scroll = app.response_scroll.saturating_add(1);
+                return EventOutcome::Continue;
+            } else if app.focused == FocusedPanel::GqlResponse {
+                app.gql_response_scroll = app.gql_response_scroll.saturating_add(1);
+                return EventOutcome::Continue;
+            } else if app.focused == FocusedPanel::WsMessages {
+                // ws scrolling not implemented yet
+                return EventOutcome::Continue;
+            }
         }
 
         _ => {}
@@ -112,6 +173,8 @@ fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
             KeyCode::Backspace => app.delete_char(),
             KeyCode::Left => app.move_cursor_left(),
             KeyCode::Right => app.move_cursor_right(),
+            KeyCode::Up => app.move_cursor_up(),
+            KeyCode::Down => app.move_cursor_down(),
             KeyCode::Enter => {
                 // Newlines allowed in multiline panels (headers, body, gql query, gql vars)
                 let multiline = matches!(

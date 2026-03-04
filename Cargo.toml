@@ -38,6 +38,9 @@ colored = "2"
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = "0.3"
 
+# Clipboard
+arboard = "3.3"
+
 [dev-dependencies]
 # HTTP mocking for tests
 wiremock = "0.6"

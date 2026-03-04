@@ -1,0 +1,111 @@
+# reqly ⚡
+
+> Postman for the terminal. A fast, terminal-native API client written in Rust.
+
+**reqly** is a developer tool for making HTTP, GraphQL, and WebSocket requests directly from the terminal. It combines the speed of CLI tools like `curl` and `httpie` with an interactive, beautifully designed Terminal UI (TUI) inspired by tools like Postman.
+
+## Features
+
+- **Multi-Protocol Support:**
+  - **HTTP:** Full REST support (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS).
+  - **GraphQL:** Native support for queries, mutations, JSON variables, and operation names.
+  - **WebSocket:** Live, interactive CLI messaging for WS/WSS endpoints.
+- **Dual Interface:**
+  - **CLI Mode:** Fast, scriptable, zero-friction command-line interface.
+  - **TUI Mode:** Keyboard-driven interactive UI with dedicated protocol tabs.
+- **Developer Experience:**
+  - Automatic JSON pretty-printing.
+  - Clean modular architecture designed for easy extensibility (e.g., adding gRPC in the future).
+  - Built natively in Rust for blazing-fast performance.
+
+---
+
+## Installation
+
+Ensure you have Rust and Cargo installed, then clone and build:
+
+```bash
+git clone https://github.com/ajkumar1205/reqly.git
+cd reqly
+cargo build --release
+```
+
+The executable will be available at `target/release/reqly`. You can move it to your PATH for global access:
+```bash
+sudo cp target/release/reqly /usr/local/bin/
+```
+
+Or just run it locally using `cargo run`.
+
+---
+
+## Interactive TUI Mode
+
+Launch the TUI by running `reqly` without any arguments:
+
+```bash
+reqly
+```
+
+### TUI Keybindings
+- **`Ctrl+P`**: Cycle through protocols (HTTP → GraphQL → WebSocket)
+- **`Tab` / `Shift+Tab`**: Move focus between panels
+- **`Ctrl+U` / `Ctrl+H` / `Ctrl+B`**: Jump to URL, Headers, or Body (in HTTP mode)
+- **`Ctrl+Q` / `Ctrl+V`**: Jump to Query or Variables (in GraphQL mode)
+- **`Enter`**: Send request / connect
+- **`Space`**: Cycle HTTP methods (when Method pane is focused)
+- **`Ctrl+C`**: Quit
+
+---
+
+## CLI Mode
+
+reqly is equally powerful as a standard command-line executable.
+
+### HTTP
+
+**GET Request:**
+```bash
+reqly GET https://jsonplaceholder.typicode.com/posts/1
+```
+
+**POST Request with body and custom headers:**
+```bash
+reqly POST https://httpbin.org/post \
+  -H "Authorization: Bearer my-token" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "reqly", "fast": true}'
+```
+
+### GraphQL
+
+Send a GraphQL query with JSON variables:
+```bash
+reqly graphql https://countries.trevorblades.com/ \
+  -q 'query GetCountry($code: ID!) { country(code: $code) { name capital } }' \
+  -v '{"code": "IN"}' \
+  -o GetCountry
+```
+
+### WebSocket
+
+Start an interactive WebSocket session (type your messages and see server replies in real-time):
+```bash
+reqly ws wss://echo.websocket.org --json
+```
+
+---
+
+## Testing
+
+reqly comes with a comprehensive suite of unit and integration tests (using `wiremock` for local server mocking). Run the tests via:
+
+```bash
+cargo test
+```
+
+---
+
+## License
+
+MIT License.

@@ -9,9 +9,9 @@ use clap::Parser;
 use colored::Colorize;
 use crossterm::{
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{prelude::CrosstermBackend, Terminal};
+use ratatui::{Terminal, prelude::CrosstermBackend};
 use std::collections::HashMap;
 use std::io;
 
@@ -20,7 +20,7 @@ use protocols::graphql::{GraphqlClient, GraphqlQuery};
 use protocols::http::{HttpClient, HttpRequest};
 use protocols::websocket::WebSocketClient;
 use tui::app::{App, FocusedPanel, ProtocolMode};
-use tui::events::{handle_events, EventOutcome};
+use tui::events::{EventOutcome, handle_events};
 use tui::ui::draw;
 use utils::parse_header;
 
@@ -265,11 +265,19 @@ async fn run_tui_loop(
         match outcome {
             EventOutcome::Quit => break,
 
-            EventOutcome::SendRequest => match app.protocol {
-                ProtocolMode::Http => tui_send_http(app).await,
-                ProtocolMode::GraphQL => tui_send_graphql(app).await,
-                ProtocolMode::WebSocket => tui_ws_connect_or_send(app).await,
-            },
+            EventOutcome::SendRequest => {
+                // Set loading status and force exactly one render BEFORE blocking on network
+                app.is_loading = true;
+                terminal.draw(|f| draw(f, app))?;
+
+                match app.protocol {
+                    ProtocolMode::Http => tui_send_http(app).await,
+                    ProtocolMode::GraphQL => tui_send_graphql(app).await,
+                    ProtocolMode::WebSocket => tui_ws_connect_or_send(app).await,
+                }
+
+                app.is_loading = false;
+            }
 
             EventOutcome::Continue => {}
         }
@@ -284,7 +292,6 @@ async fn tui_send_http(app: &mut App) {
     if app.url.trim().is_empty() {
         return;
     }
-    app.is_loading = true;
     app.response = None;
 
     let mut req = HttpRequest::new(app.method.clone(), app.url.trim());
@@ -327,7 +334,6 @@ async fn tui_send_graphql(app: &mut App) {
     if app.gql_endpoint.trim().is_empty() || app.gql_query.trim().is_empty() {
         return;
     }
-    app.is_loading = true;
     app.gql_response = None;
 
     let mut gql_query = GraphqlQuery::new(app.gql_endpoint.trim(), app.gql_query.trim());

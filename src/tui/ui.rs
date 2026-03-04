@@ -1,9 +1,9 @@
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
     widgets::{Block, Borders, Paragraph, Wrap},
-    Frame,
 };
 
 use super::app::{App, FocusedPanel, ProtocolMode};
@@ -168,37 +168,36 @@ fn draw_http_panes(f: &mut Frame, app: &App, area: Rect) {
         row[0],
     );
 
-    let url_text = cursor_text(&app.url, app.focused == FocusedPanel::Url);
-    f.render_widget(
-        Paragraph::new(url_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_border(app.focused == FocusedPanel::Url))
-                    .title(Span::styled(" URL ", Style::default().fg(COLOR_DIM))),
-            )
-            .style(Style::default().fg(COLOR_FG).bg(COLOR_PANEL)),
+    draw_editable_panel(
+        f,
         row[1],
+        " URL ",
+        &app.url,
+        app.focused == FocusedPanel::Url,
+        COLOR_DIM,
+        app.cursor_pos,
     );
 
     // Headers
-    draw_text_panel(
+    draw_editable_panel(
         f,
-        app,
         chunks[1],
         " Headers (one per line: Key: Value) ",
         &app.headers_raw,
         app.focused == FocusedPanel::Headers,
+        COLOR_DIM,
+        app.cursor_pos,
     );
 
     // Body
-    draw_text_panel(
+    draw_editable_panel(
         f,
-        app,
         chunks[2],
         " Body (JSON) ",
         &app.body_raw,
         app.focused == FocusedPanel::Body,
+        COLOR_DIM,
+        app.cursor_pos,
     );
 
     // Response
@@ -286,7 +285,8 @@ fn draw_http_response(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(
                 Paragraph::new(Text::from(lines))
                     .block(block)
-                    .wrap(Wrap { trim: false }),
+                    .wrap(Wrap { trim: false })
+                    .scroll((app.response_scroll, 0)),
                 area,
             );
         }
@@ -307,40 +307,36 @@ fn draw_graphql_panes(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // Endpoint URL
-    let ep_text = cursor_text(&app.gql_endpoint, app.focused == FocusedPanel::GqlEndpoint);
-    f.render_widget(
-        Paragraph::new(ep_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_border_color(
-                        app.focused == FocusedPanel::GqlEndpoint,
-                        COLOR_GQL,
-                    ))
-                    .title(Span::styled(" Endpoint ", Style::default().fg(COLOR_GQL))),
-            )
-            .style(Style::default().fg(COLOR_FG).bg(COLOR_PANEL)),
+    draw_editable_panel(
+        f,
         chunks[0],
+        " Endpoint ",
+        &app.gql_endpoint,
+        app.focused == FocusedPanel::GqlEndpoint,
+        COLOR_GQL,
+        app.cursor_pos,
     );
 
     // Query editor
-    draw_text_panel_color(
+    draw_editable_panel(
         f,
         chunks[1],
         " Query ",
         &app.gql_query,
         app.focused == FocusedPanel::GqlQuery,
         COLOR_GQL,
+        app.cursor_pos,
     );
 
     // Variables editor
-    draw_text_panel_color(
+    draw_editable_panel(
         f,
         chunks[2],
         " Variables (JSON) ",
         &app.gql_variables,
         app.focused == FocusedPanel::GqlVariables,
         COLOR_GQL,
+        app.cursor_pos,
     );
 
     // Response
@@ -419,7 +415,8 @@ fn draw_graphql_response(f: &mut Frame, app: &App, area: Rect) {
             f.render_widget(
                 Paragraph::new(Text::from(lines))
                     .block(block)
-                    .wrap(Wrap { trim: false }),
+                    .wrap(Wrap { trim: false })
+                    .scroll((app.gql_response_scroll, 0)),
                 area,
             );
         }
@@ -440,23 +437,14 @@ fn draw_websocket_panes(f: &mut Frame, app: &App, area: Rect) {
         .split(area);
 
     // URL
-    let url_text = cursor_text(&app.ws_url, app.focused == FocusedPanel::WsUrl);
-    f.render_widget(
-        Paragraph::new(url_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_border_color(
-                        app.focused == FocusedPanel::WsUrl,
-                        COLOR_WS,
-                    ))
-                    .title(Span::styled(
-                        " WebSocket URL (ws:// or wss://) ",
-                        Style::default().fg(COLOR_WS),
-                    )),
-            )
-            .style(Style::default().fg(COLOR_FG).bg(COLOR_PANEL)),
+    draw_editable_panel(
+        f,
         chunks[0],
+        " WebSocket URL (ws:// or wss://) ",
+        &app.ws_url,
+        app.focused == FocusedPanel::WsUrl,
+        COLOR_WS,
+        app.cursor_pos,
     );
 
     // Connection status
@@ -512,23 +500,14 @@ fn draw_websocket_panes(f: &mut Frame, app: &App, area: Rect) {
     );
 
     // Input
-    let input_text = cursor_text(&app.ws_input, app.focused == FocusedPanel::WsInput);
-    f.render_widget(
-        Paragraph::new(input_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(focused_border_color(
-                        app.focused == FocusedPanel::WsInput,
-                        COLOR_WS,
-                    ))
-                    .title(Span::styled(
-                        " Send Message (ENTER) ",
-                        Style::default().fg(COLOR_WS),
-                    )),
-            )
-            .style(Style::default().fg(COLOR_FG).bg(COLOR_PANEL)),
+    draw_editable_panel(
+        f,
         chunks[3],
+        " Send Message (ENTER) ",
+        &app.ws_input,
+        app.focused == FocusedPanel::WsInput,
+        COLOR_WS,
+        app.cursor_pos,
     );
 }
 
@@ -541,29 +520,39 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         ProtocolMode::WebSocket => COLOR_WS,
     };
 
-    let hints: &[(&str, &str)] = match app.protocol {
-        ProtocolMode::Http => &[
-            ("TAB", "next panel"),
-            ("SPACE", "cycle method"),
-            ("ENTER", "send"),
-            ("Ctrl+P", "protocol"),
-            ("Ctrl+C", "quit"),
-        ],
-        ProtocolMode::GraphQL => &[
-            ("TAB", "next panel"),
-            ("ENTER", "send"),
-            ("Ctrl+Q", "query"),
-            ("Ctrl+V", "vars"),
-            ("Ctrl+P", "protocol"),
-            ("Ctrl+C", "quit"),
-        ],
-        ProtocolMode::WebSocket => &[
-            ("TAB", "next panel"),
-            ("ENTER", "connect/send"),
-            ("Ctrl+P", "protocol"),
-            ("Ctrl+C", "quit"),
-        ],
-    };
+    let mut hints = vec![("TAB", "next panel")];
+
+    match app.protocol {
+        ProtocolMode::Http => {
+            hints.push(("Ctrl+S", "send"));
+            if app.focused == FocusedPanel::Response {
+                hints.push(("y/c", "copy"));
+                hints.push(("↑/↓", "scroll"));
+                hints.push(("ENTER", "resend"));
+            } else {
+                hints.push(("SPACE", "cycle method"));
+                hints.push(("ENTER", "send"));
+            }
+        }
+        ProtocolMode::GraphQL => {
+            hints.push(("Ctrl+S", "send"));
+            if app.focused == FocusedPanel::GqlResponse {
+                hints.push(("y/c", "copy"));
+                hints.push(("↑/↓", "scroll"));
+                hints.push(("ENTER", "resend"));
+            } else {
+                hints.push(("ENTER", "send"));
+                hints.push(("Ctrl+Q", "query"));
+                hints.push(("Ctrl+V", "vars"));
+            }
+        }
+        ProtocolMode::WebSocket => {
+            hints.push(("ENTER", "send/connect")); // Modified this line
+        }
+    }
+
+    hints.push(("Ctrl+P", "protocol"));
+    hints.push(("Ctrl+C", "quit"));
 
     let mut spans: Vec<Span> = vec![];
     for (key, desc) in hints {
@@ -606,64 +595,68 @@ fn focused_border_color(active: bool, color: Color) -> Style {
     }
 }
 
-fn cursor_text(text: &str, active: bool) -> String {
-    if active {
-        format!("{text}_")
+fn with_cursor(text: &str, cursor_pos: usize) -> String {
+    let mut s = String::new();
+    let mut chars = text.chars();
+    for _ in 0..cursor_pos {
+        if let Some(c) = chars.next() {
+            s.push(c);
+        }
+    }
+    s.push('█');
+    for c in chars {
+        s.push(c);
+    }
+    s
+}
+
+fn calculate_scroll(text: &str, cursor_pos: usize, area_height: u16) -> u16 {
+    let up_to_cursor: String = text.chars().take(cursor_pos).collect();
+    let current_line = up_to_cursor.split('\n').count().saturating_sub(1) as u16;
+    let inner_height = area_height.saturating_sub(2);
+    if inner_height == 0 {
+        return 0;
+    }
+    if current_line >= inner_height {
+        current_line - inner_height + 1
     } else {
-        text.to_string()
+        0
     }
 }
 
-fn draw_text_panel(
-    f: &mut Frame,
-    _app: &App,
-    area: Rect,
-    title: &str,
-    content: &str,
-    focused: bool,
-) {
-    let display = if focused {
-        format!("{content}_")
-    } else {
-        content.to_string()
-    };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(focused_border(focused))
-        .title(Span::styled(title, Style::default().fg(COLOR_DIM)))
-        .style(Style::default().bg(COLOR_PANEL));
-    f.render_widget(
-        Paragraph::new(display)
-            .block(block)
-            .style(Style::default().fg(COLOR_FG))
-            .wrap(Wrap { trim: false }),
-        area,
-    );
-}
-
-fn draw_text_panel_color(
+fn draw_editable_panel(
     f: &mut Frame,
     area: Rect,
     title: &str,
     content: &str,
-    focused: bool,
+    is_focused: bool,
     color: Color,
+    cursor_pos: usize,
 ) {
-    let display = if focused {
-        format!("{content}_")
+    let display = if is_focused {
+        with_cursor(content, cursor_pos)
     } else {
         content.to_string()
     };
+
+    let scroll_y = if is_focused {
+        calculate_scroll(content, cursor_pos, area.height)
+    } else {
+        0
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(focused_border_color(focused, color))
+        .border_style(focused_border_color(is_focused, color))
         .title(Span::styled(title, Style::default().fg(color)))
         .style(Style::default().bg(COLOR_PANEL));
+
     f.render_widget(
         Paragraph::new(display)
             .block(block)
             .style(Style::default().fg(COLOR_FG))
-            .wrap(Wrap { trim: false }),
+            .wrap(Wrap { trim: false })
+            .scroll((scroll_y, 0)),
         area,
     );
 }

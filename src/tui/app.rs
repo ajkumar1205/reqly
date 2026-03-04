@@ -83,6 +83,8 @@ pub struct App {
     #[allow(dead_code)]
     pub should_quit: bool,
     pub cursor_pos: usize,
+    pub response_scroll: u16,
+    pub gql_response_scroll: u16,
 }
 
 impl App {
@@ -110,6 +112,8 @@ impl App {
             is_loading: false,
             should_quit: false,
             cursor_pos: 0,
+            response_scroll: 0,
+            gql_response_scroll: 0,
         }
     }
 
@@ -238,9 +242,72 @@ impl App {
     }
 
     pub fn move_cursor_right(&mut self) {
-        let max = self.active_text().len();
-        if self.cursor_pos < max {
-            self.cursor_pos += 1;
+        let text = self.active_text();
+        if self.cursor_pos < text.len() {
+            if let Some(c) = text[self.cursor_pos..].chars().next() {
+                self.cursor_pos += c.len_utf8();
+            } else {
+                self.cursor_pos += 1;
+            }
+        }
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        let text = self.active_text();
+        if text.is_empty() || self.cursor_pos == 0 {
+            return;
+        }
+        let pos = self.cursor_pos;
+        let current_line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col = text[current_line_start..pos].chars().count();
+
+        if current_line_start == 0 {
+            self.cursor_pos = 0;
+            return;
+        }
+
+        let prev_line_start = text[..current_line_start - 1]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let prev_line_text = &text[prev_line_start..current_line_start - 1];
+        let prev_chars: Vec<(usize, char)> = prev_line_text.char_indices().collect();
+
+        let new_col = std::cmp::min(col, prev_chars.len());
+        if new_col == prev_chars.len() {
+            self.cursor_pos = current_line_start - 1;
+        } else {
+            self.cursor_pos = prev_line_start + prev_chars[new_col].0;
+        }
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        let text = self.active_text();
+        if text.is_empty() || self.cursor_pos == text.len() {
+            return;
+        }
+        let pos = self.cursor_pos;
+        let current_line_start = text[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col = text[current_line_start..pos].chars().count();
+
+        if let Some(idx) = text[pos..].find('\n') {
+            let next_line_start = pos + idx + 1;
+            let next_line_text = if let Some(end_idx) = text[next_line_start..].find('\n') {
+                &text[next_line_start..next_line_start + end_idx]
+            } else {
+                &text[next_line_start..]
+            };
+
+            let next_chars: Vec<(usize, char)> = next_line_text.char_indices().collect();
+            let new_col = std::cmp::min(col, next_chars.len());
+
+            if new_col == next_chars.len() {
+                self.cursor_pos = next_line_start + next_line_text.len();
+            } else {
+                self.cursor_pos = next_line_start + next_chars[new_col].0;
+            }
+        } else {
+            self.cursor_pos = text.len();
         }
     }
 
