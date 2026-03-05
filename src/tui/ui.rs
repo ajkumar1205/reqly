@@ -60,7 +60,7 @@ fn draw_title_bar(f: &mut Frame, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "v0.2 — HTTP · GraphQL · WebSocket",
+            "v0.1.0 — HTTP · GraphQL · WebSocket",
             Style::default().fg(COLOR_DIM),
         ),
     ]))
@@ -520,7 +520,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         ProtocolMode::WebSocket => COLOR_WS,
     };
 
-    let mut hints = vec![("Ctrl+Tab", "next panel")];
+    let mut hints = vec![("F6", "next panel"), ("F7", "prev panel")];
 
     let is_editable = matches!(
         app.focused,

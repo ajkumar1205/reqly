@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 #[derive(Parser, Debug)]
 #[command(
     name = "reqly",
-    version = "0.2.0",
+    version = "0.1.0",
     about = "Terminal-native API client: HTTP, GraphQL, WebSocket",
     long_about = None,
 )]

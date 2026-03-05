@@ -17,7 +17,7 @@ pub struct GraphqlClient {
 impl GraphqlClient {
     pub fn new() -> Result<Self> {
         let client = Client::builder()
-            .user_agent("reqly/0.2.0")
+            .user_agent("reqly/0.1.0")
             .build()
             .context("Failed to build GraphQL HTTP client")?;
         Ok(Self { inner: client })

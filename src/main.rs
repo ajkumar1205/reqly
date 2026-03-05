@@ -279,7 +279,18 @@ async fn run_tui_loop(
             EventOutcome::Quit => break,
 
             EventOutcome::SendRequest => {
-                // Set loading status and force exactly one render BEFORE blocking on network
+                // Clear previous response so the loading spinner shows on resend too
+                match app.protocol {
+                    ProtocolMode::Http => {
+                        app.response = None;
+                    }
+                    ProtocolMode::GraphQL => {
+                        app.gql_response = None;
+                    }
+                    ProtocolMode::WebSocket => {}
+                }
+
+                // Force one render showing the spinner BEFORE blocking on network
                 app.is_loading = true;
                 terminal.draw(|f| draw(f, app))?;
 

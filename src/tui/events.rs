@@ -41,21 +41,20 @@ fn process_key(
             return EventOutcome::Continue;
         }
 
-        // Ctrl+Tab / Shift+Tab — move between panels within the active protocol
-        (KeyModifiers::CONTROL, KeyCode::Tab) => {
+        // F6 / F7 — move between panels reliably (Ctrl+Tab is intercepted by terminal emulators)
+        (KeyModifiers::NONE, KeyCode::F(6)) => {
             app.focus_next();
             return EventOutcome::Continue;
         }
-        (KeyModifiers::SHIFT, KeyCode::BackTab) => {
+        (KeyModifiers::NONE, KeyCode::F(7)) | (KeyModifiers::SHIFT, KeyCode::BackTab) => {
             app.focus_prev();
             return EventOutcome::Continue;
         }
-        // If it's a single-line simple field, pure Tab also jumps next
+        // Pure Tab on single-line fields also jumps to next panel for convenience
         (KeyModifiers::NONE, KeyCode::Tab) if !app.is_multiline_focused() => {
             app.focus_next();
             return EventOutcome::Continue;
         }
-        // Removed duplicate BackTab block
 
         // HTTP-specific jump shortcuts
         (KeyModifiers::CONTROL, KeyCode::Char('u')) if app.protocol == ProtocolMode::Http => {
@@ -134,18 +133,19 @@ fn process_key(
             return EventOutcome::Continue;
         }
 
-        // 'y' or 'c' on Response panel to yank body
+        // Ctrl+Y / Ctrl+W on Response panel — copy body to clipboard
+        // Using Ctrl+Y / Ctrl+W instead of bare 'y'/'c' to avoid eating text
+        // editing characters when focus is on a response-adjacent editable.
+        // We still support bare 'y'/'c' ONLY when the response panel is focused.
         (KeyModifiers::NONE, KeyCode::Char('y')) | (KeyModifiers::NONE, KeyCode::Char('c')) => {
             if app.focused == FocusedPanel::Response {
                 if let Some(Ok(resp)) = &app.response {
-                    let mut clipboard = arboard::Clipboard::new().unwrap();
-                    let _ = clipboard.set_text(resp.body.clone());
+                    copy_to_clipboard(&resp.body);
                 }
                 return EventOutcome::Continue;
             } else if app.focused == FocusedPanel::GqlResponse {
                 if let Some(Ok(resp)) = &app.gql_response {
-                    let mut clipboard = arboard::Clipboard::new().unwrap();
-                    let _ = clipboard.set_text(resp.pretty_body());
+                    copy_to_clipboard(&resp.pretty_body());
                 }
                 return EventOutcome::Continue;
             }
@@ -209,8 +209,12 @@ fn process_key(
             KeyCode::Up => app.move_cursor_up(),
             KeyCode::Down => app.move_cursor_down(),
             KeyCode::Tab => {
+                // Tab in multiline panels inserts 4 spaces for JSON indentation
                 if app.is_multiline_focused() {
                     app.insert_str("    ");
+                } else {
+                    // single-line fields: jump focus (same as F6)
+                    app.focus_next();
                 }
             }
             KeyCode::PageUp => {
@@ -282,4 +286,36 @@ fn process_key(
     }
 
     EventOutcome::Continue
+}
+
+// ── Clipboard helper ──────────────────────────────────────────────────────────
+// We spawn a subprocess and pipe the text in, instead of using arboard directly,
+// because arboard prints diagnostic messages to stderr which break the raw-mode TUI.
+fn copy_to_clipboard(text: &str) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    // Try wl-copy (Wayland), then xclip (X11), then xsel as fallback.
+    let backends: &[(&str, &[&str])] = &[
+        ("wl-copy", &[]),
+        ("xclip", &["-selection", "clipboard"]),
+        ("xsel", &["--clipboard", "--input"]),
+    ];
+
+    for (bin, args) in backends {
+        if let Ok(mut child) = Command::new(bin)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            if let Some(stdin) = child.stdin.take() {
+                let mut stdin = stdin;
+                let _ = stdin.write_all(text.as_bytes());
+            }
+            // Don't wait — let it run in the background
+            return;
+        }
+    }
 }

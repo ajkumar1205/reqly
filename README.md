@@ -50,11 +50,13 @@ reqly
 ```
 
 ### TUI Keybindings
+- **`F6`**: Next panel
+- **`F7`** / **`Shift+Tab`**: Previous panel
+- **`Tab`**: Insert 4 spaces inside multiline fields (Headers / Body / GraphQL) OR jump to next panel in single-line fields
 - **`Ctrl+P`**: Cycle through protocols (HTTP → GraphQL → WebSocket)
-- **`Tab` / `Shift+Tab`**: Move focus between panels
 - **`Up` / `Down`**: Navigate multi-line text or scroll response panes
 - **`PageUp` / `PageDown`** (or `Ctrl+Up` / `Ctrl+Down`): Cycle backward/forward through local request history (in-place)
-- **`y` / `c`**: Copy active response to clipboard
+- **`y` / `c`**: Copy response body to clipboard (only when Response panel is focused)
 - **`Enter`**: Send request / connect / resend
 - **`Space`**: Cycle HTTP methods (when Method pane is focused)
 - **`Ctrl+C`**: Quit
