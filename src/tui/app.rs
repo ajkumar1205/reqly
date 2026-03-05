@@ -85,6 +85,11 @@ pub struct App {
     pub cursor_pos: usize,
     pub response_scroll: u16,
     pub gql_response_scroll: u16,
+
+    // ── History Cycling
+    pub history_index: usize,
+    pub working_draft: Option<String>,
+    pub history_cache: Option<Vec<String>>,
 }
 
 impl App {
@@ -114,7 +119,18 @@ impl App {
             cursor_pos: 0,
             response_scroll: 0,
             gql_response_scroll: 0,
+            history_index: 0,
+            working_draft: None,
+            history_cache: None,
         }
+    }
+
+    // ── History Cycling Helpers ───────────────────────────────────────────────
+
+    pub fn reset_history_state(&mut self) {
+        self.history_index = 0;
+        self.working_draft = None;
+        self.history_cache = None;
     }
 
     // ── Protocol cycling ──────────────────────────────────────────────────────
@@ -127,6 +143,7 @@ impl App {
             ProtocolMode::WebSocket => FocusedPanel::WsUrl,
         };
         self.cursor_pos = 0;
+        self.reset_history_state();
     }
 
     // ── HTTP helpers ──────────────────────────────────────────────────────────
@@ -163,6 +180,7 @@ impl App {
             _ => self.focused.clone(),
         };
         self.cursor_pos = self.active_text().len();
+        self.reset_history_state();
     }
 
     pub fn focus_prev(&mut self) {
@@ -182,6 +200,7 @@ impl App {
             _ => self.focused.clone(),
         };
         self.cursor_pos = self.active_text().len();
+        self.reset_history_state();
     }
 
     // ── Text editing ──────────────────────────────────────────────────────────
@@ -222,6 +241,26 @@ impl App {
             }
         }
         self.cursor_pos += 1;
+    }
+
+    pub fn insert_str(&mut self, text: &str) {
+        let pos = self.cursor_pos;
+        if let Some(buf) = self.active_text_mut() {
+            if pos <= buf.len() {
+                buf.insert_str(pos, text);
+            }
+        }
+        self.cursor_pos += text.len();
+    }
+
+    pub fn is_multiline_focused(&self) -> bool {
+        matches!(
+            self.focused,
+            FocusedPanel::Headers
+                | FocusedPanel::Body
+                | FocusedPanel::GqlQuery
+                | FocusedPanel::GqlVariables
+        )
     }
 
     pub fn delete_char(&mut self) {
@@ -307,7 +346,41 @@ impl App {
                 self.cursor_pos = next_line_start + next_chars[new_col].0;
             }
         } else {
-            self.cursor_pos = text.len();
+            self.cursor_pos += text.chars().count();
+        }
+    }
+
+    // ── History Querying ──────────────────────────────────────────────────────
+
+    pub fn fetch_history_for_panel(&self, db_conn: &Option<rusqlite::Connection>) -> Vec<String> {
+        let conn = match db_conn {
+            Some(c) => c,
+            None => return vec![],
+        };
+
+        match self.focused {
+            FocusedPanel::Url | FocusedPanel::GqlEndpoint | FocusedPanel::WsUrl => {
+                crate::storage::queries::fetch_recent_urls(conn).unwrap_or_default()
+            }
+            FocusedPanel::Body | FocusedPanel::GqlVariables | FocusedPanel::WsInput => {
+                let current_url = match self.focused {
+                    FocusedPanel::Body => self.url.trim(),
+                    FocusedPanel::GqlVariables => self.gql_endpoint.trim(),
+                    FocusedPanel::WsInput => self.ws_url.trim(),
+                    _ => "",
+                };
+
+                if current_url.is_empty() {
+                    crate::storage::queries::fetch_recent_bodies_global(conn).unwrap_or_default()
+                } else {
+                    crate::storage::queries::fetch_recent_bodies_for_url(conn, current_url)
+                        .unwrap_or_default()
+                }
+            }
+            FocusedPanel::Headers | FocusedPanel::GqlQuery => {
+                crate::storage::queries::fetch_recent_headers(conn).unwrap_or_default()
+            }
+            _ => vec![],
         }
     }
 

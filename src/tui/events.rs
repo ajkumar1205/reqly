@@ -12,17 +12,24 @@ pub enum EventOutcome {
 }
 
 /// Poll for terminal events (50ms timeout) and apply them to `app`.
-pub fn handle_events(app: &mut App) -> Result<EventOutcome> {
+pub fn handle_events(
+    app: &mut App,
+    db_conn: &mut Option<rusqlite::Connection>,
+) -> Result<EventOutcome> {
     if !event::poll(Duration::from_millis(50))? {
         return Ok(EventOutcome::Continue);
     }
     if let Event::Key(key) = event::read()? {
-        return Ok(process_key(app, key));
+        return Ok(process_key(app, key, db_conn));
     }
     Ok(EventOutcome::Continue)
 }
 
-fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
+fn process_key(
+    app: &mut App,
+    key: KeyEvent,
+    db_conn: &mut Option<rusqlite::Connection>,
+) -> EventOutcome {
     // ── Global shortcuts ──────────────────────────────────────────────────────
     match (key.modifiers, key.code) {
         // Quit
@@ -34,8 +41,8 @@ fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
             return EventOutcome::Continue;
         }
 
-        // Tab / Shift-Tab — move between panels within the active protocol
-        (KeyModifiers::NONE, KeyCode::Tab) => {
+        // Ctrl+Tab / Shift+Tab — move between panels within the active protocol
+        (KeyModifiers::CONTROL, KeyCode::Tab) => {
             app.focus_next();
             return EventOutcome::Continue;
         }
@@ -43,6 +50,12 @@ fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
             app.focus_prev();
             return EventOutcome::Continue;
         }
+        // If it's a single-line simple field, pure Tab also jumps next
+        (KeyModifiers::NONE, KeyCode::Tab) if !app.is_multiline_focused() => {
+            app.focus_next();
+            return EventOutcome::Continue;
+        }
+        // Removed duplicate BackTab block
 
         // HTTP-specific jump shortcuts
         (KeyModifiers::CONTROL, KeyCode::Char('u')) if app.protocol == ProtocolMode::Http => {
@@ -100,6 +113,19 @@ fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
             // If it's a multiline editable panel (Headers, Body, GqlQuery, GqlVariables),
             // we do NOT return here — it falls through to the editable panel section
             // below to properly insert a '\n' character!
+        }
+
+        // PageUp or Ctrl+Up to cycle older history
+        (KeyModifiers::CONTROL, KeyCode::Up) => {
+            // Re-use the same PageUp logic that will be defined below for editable panels
+            // We just map it here to be safe if they use Ctrl+Up instead of PageUp.
+            // Rather than duplicate, we can just translate the event, but for simplicity we'll let it drop through to the editable block
+            // since this block returns EventOutcome. We will NOT return EventOutcome here so it drops to matched keys.
+        }
+
+        // PageDown or Ctrl+Down to cycle newer history
+        (KeyModifiers::CONTROL, KeyCode::Down) => {
+            // Same as above
         }
 
         // SPACE on Method panel — cycle HTTP method
@@ -168,13 +194,76 @@ fn process_key(app: &mut App, key: KeyEvent) -> EventOutcome {
     );
 
     if is_editable {
-        match key.code {
+        // Map Ctrl+Up to PageUp and Ctrl+Down to PageDown for history
+        let canonical_code = match (key.modifiers, key.code) {
+            (KeyModifiers::CONTROL, KeyCode::Up) => KeyCode::PageUp,
+            (KeyModifiers::CONTROL, KeyCode::Down) => KeyCode::PageDown,
+            (_, code) => code,
+        };
+
+        match canonical_code {
             KeyCode::Char(c) => app.insert_char(c),
             KeyCode::Backspace => app.delete_char(),
             KeyCode::Left => app.move_cursor_left(),
             KeyCode::Right => app.move_cursor_right(),
             KeyCode::Up => app.move_cursor_up(),
             KeyCode::Down => app.move_cursor_down(),
+            KeyCode::Tab => {
+                if app.is_multiline_focused() {
+                    app.insert_str("    ");
+                }
+            }
+            KeyCode::PageUp => {
+                if app.history_cache.is_none() {
+                    let fetched = app.fetch_history_for_panel(db_conn);
+                    app.history_cache = Some(fetched);
+                }
+
+                let history_len = app.history_cache.as_ref().unwrap().len();
+                if history_len > 0 {
+                    // Save draft on first navigation away from current
+                    if app.history_index == 0 && app.working_draft.is_none() {
+                        app.working_draft = Some(app.active_text().to_string());
+                    }
+
+                    if app.history_index < history_len {
+                        app.history_index += 1;
+                        let next_text =
+                            app.history_cache.as_ref().unwrap()[app.history_index - 1].clone();
+
+                        if let Some(buf) = app.active_text_mut() {
+                            *buf = next_text;
+                        }
+                        app.cursor_pos = app.active_text().len();
+                    }
+                }
+            }
+            KeyCode::PageDown => {
+                if app.history_index > 0 {
+                    app.history_index -= 1;
+
+                    if app.history_index == 0 {
+                        // Restore draft
+                        if let Some(draft) = app.working_draft.take() {
+                            if let Some(buf) = app.active_text_mut() {
+                                *buf = draft;
+                            }
+                        }
+                    } else {
+                        // Go newer in history
+                        if app.history_cache.is_none() {
+                            let fetched = app.fetch_history_for_panel(db_conn);
+                            app.history_cache = Some(fetched);
+                        }
+                        let next_text =
+                            app.history_cache.as_ref().unwrap()[app.history_index - 1].clone();
+                        if let Some(buf) = app.active_text_mut() {
+                            *buf = next_text;
+                        }
+                    }
+                    app.cursor_pos = app.active_text().len();
+                }
+            }
             KeyCode::Enter => {
                 // Newlines allowed in multiline panels (headers, body, gql query, gql vars)
                 let multiline = matches!(

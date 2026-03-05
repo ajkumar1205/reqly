@@ -1,15 +1,15 @@
 mod cli;
 mod formatter;
 mod protocols;
+mod storage;
 mod tui;
 mod utils;
 
 use anyhow::Result;
 use clap::Parser;
 use colored::Colorize;
-use crossterm::{
-    execute,
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::{Terminal, prelude::CrosstermBackend};
 use std::collections::HashMap;
@@ -19,6 +19,7 @@ use cli::{Cli, Commands, ParsedRequest};
 use protocols::graphql::{GraphqlClient, GraphqlQuery};
 use protocols::http::{HttpClient, HttpRequest};
 use protocols::websocket::WebSocketClient;
+use protocols::websocket::message::WsMessage;
 use tui::app::{App, FocusedPanel, ProtocolMode};
 use tui::events::{EventOutcome, handle_events};
 use tui::ui::draw;
@@ -31,51 +32,73 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        None => run_tui().await?,
-        Some(cmd) => dispatch_cli(cmd).await?,
-    }
-
-    Ok(())
-}
-
-// ─── CLI dispatch ─────────────────────────────────────────────────────────────
-
-async fn dispatch_cli(command: Commands) -> Result<()> {
-    match &command {
         // GraphQL
-        Commands::Graphql {
+        Some(Commands::Graphql {
             url,
             query,
             variables,
             operation,
             headers,
-        } => {
+        }) => {
             run_cli_graphql(
-                url,
-                query,
+                &url,
+                &query,
                 variables.as_deref(),
                 operation.as_deref(),
-                headers,
+                &headers,
             )
             .await?;
         }
 
         // WebSocket
-        Commands::Ws {
-            url, headers, json, ..
-        } => {
-            run_cli_ws(url, headers, *json).await?;
+        Some(Commands::Ws {
+            url,
+            headers,
+            json,
+            ping,
+        }) => {
+            run_cli_ws(&url, &headers, json, ping).await?;
         }
 
         // All HTTP methods
-        _ => {
-            if let Some(parsed) = ParsedRequest::from_command(&command) {
+        Some(cmd) => {
+            if let Some(parsed) = ParsedRequest::from_command(&cmd) {
                 run_cli_http(parsed).await?;
             }
         }
+
+        // TUI
+        None => {
+            // Init SQLite DB
+            let mut db_conn = match storage::db::init_db() {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!("Failed to initialize local request history DB: {}", e);
+                    None
+                }
+            };
+
+            let mut app = App::new();
+            // Run TUI
+            crossterm::terminal::enable_raw_mode()?;
+            crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+            let mut terminal = Terminal::new(CrosstermBackend::new(io::stdout()))?;
+
+            let res = run_tui_loop(&mut terminal, &mut app, &mut db_conn).await;
+
+            crossterm::terminal::disable_raw_mode()?;
+            crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen)?;
+
+            if let Err(err) = res {
+                println!("{:?}", err)
+            }
+        }
     }
+
     Ok(())
 }
+
+// ─── CLI dispatch is now handled inherently in main ───────────────────────────
 
 // ─── HTTP CLI ─────────────────────────────────────────────────────────────────
 
@@ -222,7 +245,12 @@ async fn run_cli_graphql(
 
 // ─── WebSocket CLI ────────────────────────────────────────────────────────────
 
-async fn run_cli_ws(url: &str, raw_headers: &[String], pretty_json: bool) -> Result<()> {
+async fn run_cli_ws(
+    url: &str,
+    raw_headers: &[String],
+    pretty_json: bool,
+    _ping: bool,
+) -> Result<()> {
     let mut headers = HashMap::new();
     for raw in raw_headers {
         if let Some((k, v)) = parse_header(raw) {
@@ -235,32 +263,17 @@ async fn run_cli_ws(url: &str, raw_headers: &[String], pretty_json: bool) -> Res
 
 // ─── TUI Mode ────────────────────────────────────────────────────────────────
 
-async fn run_tui() -> Result<()> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-
-    let mut app = App::new();
-    let result = run_tui_loop(&mut terminal, &mut app).await;
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    result
-}
+// The run_tui wrapper was removed.
 
 async fn run_tui_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
+    db_conn: &mut Option<rusqlite::Connection>,
 ) -> Result<()> {
     loop {
         terminal.draw(|f| draw(f, app))?;
 
-        let outcome = handle_events(app)?;
+        let outcome = handle_events(app, db_conn)?;
 
         match outcome {
             EventOutcome::Quit => break,
@@ -271,9 +284,9 @@ async fn run_tui_loop(
                 terminal.draw(|f| draw(f, app))?;
 
                 match app.protocol {
-                    ProtocolMode::Http => tui_send_http(app).await,
-                    ProtocolMode::GraphQL => tui_send_graphql(app).await,
-                    ProtocolMode::WebSocket => tui_ws_connect_or_send(app).await,
+                    ProtocolMode::Http => tui_send_http(app, db_conn).await,
+                    ProtocolMode::GraphQL => tui_send_graphql(app, db_conn).await,
+                    ProtocolMode::WebSocket => tui_ws_connect_or_send(app, db_conn).await,
                 }
 
                 app.is_loading = false;
@@ -288,7 +301,7 @@ async fn run_tui_loop(
 
 // ─── TUI HTTP send ────────────────────────────────────────────────────────────
 
-async fn tui_send_http(app: &mut App) {
+async fn tui_send_http(app: &mut App, db_conn: &mut Option<rusqlite::Connection>) {
     if app.url.trim().is_empty() {
         return;
     }
@@ -319,9 +332,28 @@ async fn tui_send_http(app: &mut App) {
         Ok(client) => match client.send(req).await {
             Ok(resp) => {
                 app.focused = FocusedPanel::Response;
+                let resp_body = resp.body.clone();
+                let status_code = resp.status;
+                let duration_ms = resp.duration_ms;
+
+                if let Some(conn) = db_conn {
+                    let _ = storage::queries::insert_request(
+                        conn,
+                        "HTTP",
+                        app.url.trim(),
+                        &app.method,
+                        &app.headers_raw,
+                        &app.body_raw,
+                        &resp_body,
+                        status_code as i64,
+                        duration_ms as i64,
+                    );
+                }
                 app.response = Some(Ok(resp));
             }
-            Err(e) => app.response = Some(Err(e.to_string())),
+            Err(e) => {
+                app.response = Some(Err(e.to_string()));
+            }
         },
     }
 
@@ -330,7 +362,7 @@ async fn tui_send_http(app: &mut App) {
 
 // ─── TUI GraphQL send ─────────────────────────────────────────────────────────
 
-async fn tui_send_graphql(app: &mut App) {
+async fn tui_send_graphql(app: &mut App, _db_conn: &mut Option<rusqlite::Connection>) {
     if app.gql_endpoint.trim().is_empty() || app.gql_query.trim().is_empty() {
         return;
     }
@@ -360,7 +392,7 @@ async fn tui_send_graphql(app: &mut App) {
 
 // ─── TUI WebSocket (informational — full interactive WS in TUI is CLI-focused)
 
-async fn tui_ws_connect_or_send(app: &mut App) {
+async fn tui_ws_connect_or_send(app: &mut App, _db_conn: &mut Option<rusqlite::Connection>) {
     use protocols::websocket::ConnectionStatus;
 
     if app.ws_url.trim().is_empty() {

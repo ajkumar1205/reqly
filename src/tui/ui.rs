@@ -520,7 +520,23 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
         ProtocolMode::WebSocket => COLOR_WS,
     };
 
-    let mut hints = vec![("TAB", "next panel")];
+    let mut hints = vec![("Ctrl+Tab", "next panel")];
+
+    let is_editable = matches!(
+        app.focused,
+        FocusedPanel::Url
+            | FocusedPanel::Headers
+            | FocusedPanel::Body
+            | FocusedPanel::GqlEndpoint
+            | FocusedPanel::GqlQuery
+            | FocusedPanel::GqlVariables
+            | FocusedPanel::WsUrl
+            | FocusedPanel::WsInput
+    );
+
+    if is_editable {
+        hints.push(("PgUp/Dn", "history"));
+    }
 
     match app.protocol {
         ProtocolMode::Http => {
@@ -547,7 +563,7 @@ fn draw_status_bar(f: &mut Frame, app: &App, area: Rect) {
             }
         }
         ProtocolMode::WebSocket => {
-            hints.push(("ENTER", "send/connect")); // Modified this line
+            hints.push(("ENTER", "send/connect"));
         }
     }
 

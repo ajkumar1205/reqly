@@ -41,6 +41,10 @@ futures-util = "0.3"
 # Clipboard
 arboard = "3.3"
 
+# Storage
+rusqlite = { version = "0.31", features = ["bundled"] }
+dirs = "5.0"
+
 [dev-dependencies]
 # HTTP mocking for tests
 wiremock = "0.6"

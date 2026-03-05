@@ -15,6 +15,8 @@
   - **TUI Mode:** Keyboard-driven interactive UI with dedicated protocol tabs.
 - **Developer Experience:**
   - Automatic JSON pretty-printing.
+  - **Local SQLite History:** Automatically saves your requests. Cycle through past URLs and bodies in-place perfectly mimicking terminal history.
+  - Multi-line editing, Response scrolling, and clipboard copying.
   - Clean modular architecture designed for easy extensibility (e.g., adding gRPC in the future).
   - Built natively in Rust for blazing-fast performance.
 
@@ -50,9 +52,10 @@ reqly
 ### TUI Keybindings
 - **`Ctrl+P`**: Cycle through protocols (HTTP → GraphQL → WebSocket)
 - **`Tab` / `Shift+Tab`**: Move focus between panels
-- **`Ctrl+U` / `Ctrl+H` / `Ctrl+B`**: Jump to URL, Headers, or Body (in HTTP mode)
-- **`Ctrl+Q` / `Ctrl+V`**: Jump to Query or Variables (in GraphQL mode)
-- **`Enter`**: Send request / connect
+- **`Up` / `Down`**: Navigate multi-line text or scroll response panes
+- **`PageUp` / `PageDown`** (or `Ctrl+Up` / `Ctrl+Down`): Cycle backward/forward through local request history (in-place)
+- **`y` / `c`**: Copy active response to clipboard
+- **`Enter`**: Send request / connect / resend
 - **`Space`**: Cycle HTTP methods (when Method pane is focused)
 - **`Ctrl+C`**: Quit
 
